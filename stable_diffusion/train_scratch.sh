@@ -1,13 +1,28 @@
-export MODEL_NAME="CompVis/stable-diffusion-v1-4"
-export DATASET_NAME="imagenet-1k"
+#!/bin/bash -l
+#SBATCH --job-name=immdiff
+#SBATCH --nodes=1
+#SBATCH --partition=gpu
+#SBATCH --time=10:00:00
+#SBATCH --output=slurm.out
+#SBATCH --error=slurm.err
 
-accelerate config
-accelerate launch --main_process_port 29600 --mixed_precision="fp16" --multi_gpu --num_processes 8 conditional_scratch_train_sd.py \
+conda activate sd
+
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=29600
+export WORLD_SIZE=1  # Assuming 4 GPUs
+export RANK=0       # Replace with the rank of the current process
+
+export MODEL_NAME="CompVis/stable-diffusion-v1-4"
+export DATASET_NAME="cifar10"
+
+# accelerate config
+accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" conditional_scratch_train_sd.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
   --use_ema \
   --resolution=256 --center_crop --random_flip \
-  --train_batch_size=256 \
+  --train_batch_size=128 \
   --gradient_accumulation_steps=1 \
   --gradient_checkpointing \
   --max_train_steps=20000 \
@@ -19,4 +34,4 @@ accelerate launch --main_process_port 29600 --mixed_precision="fp16" --multi_gpu
   --caption_column="label" \
   --dataloader_num_workers=20 \
   --seed=42 \
-  --checkpointing_steps=2500
+  --checkpointing_steps=2500 --image_column=img

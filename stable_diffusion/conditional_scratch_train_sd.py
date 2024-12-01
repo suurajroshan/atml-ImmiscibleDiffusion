@@ -502,6 +502,11 @@ def parse_args():
 
 
 def main():
+
+
+    if dist.is_available() and not dist.is_initialized():
+        dist.init_process_group(backend="nccl")  # Or "gloo" for CPU-only
+
     args = parse_args()
 
     if args.report_to == "wandb" and args.hub_token is not None:
@@ -731,6 +736,7 @@ def main():
 
     # 6. Get the column names for input/target.
     dataset_columns = DATASET_NAME_MAPPING.get(args.dataset_name, None)
+    print(dataset_columns)
     if args.image_column is None:
         image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
     else:

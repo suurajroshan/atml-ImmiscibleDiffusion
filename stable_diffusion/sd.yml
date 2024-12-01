@@ -44,11 +44,11 @@ dependencies:
     - certifi==2024.2.2
     - charset-normalizer==3.3.2
     - clean-fid==0.1.35
-    - clip==1.0
+      #  - clip==1.0
     - contourpy==1.2.1
     - cycler==0.12.1
     - datasets==2.19.1
-    - diffusers==0.28.0.dev0
+    - diffusers==0.28.0
     - dill==0.3.8
     - filelock==3.14.0
     - fonttools==4.53.0
