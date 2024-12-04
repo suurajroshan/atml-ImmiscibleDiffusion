@@ -25,7 +25,7 @@ accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" cond
   --train_batch_size=128 \
   --gradient_accumulation_steps=1 \
   --gradient_checkpointing \
-  --max_train_steps=100000 \
+  --max_train_steps=1000 \
   --learning_rate=1e-04 \
   --max_grad_norm=1 \
   --lr_scheduler="constant" --lr_warmup_steps=0 \
@@ -34,4 +34,6 @@ accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" cond
   --caption_column="label" \
   --dataloader_num_workers=1 \
   --seed=42 \
-  --checkpointing_steps=10000 --image_column=img
+  --checkpointing_steps=1000 --image_column=img \
+  --validation_prompts="0,1,2,3,4,5,6,7,8,9" \
+  --validation_epochs=1
