@@ -24,7 +24,7 @@ def main():
     bs = 128 # batch size
     tot = 50000 # total number of images
 
-    model_path = "path/to/your/output/directory"
+    model_path = "scratch"
     unet = UNet2DConditionModel.from_pretrained(model_path + f"/checkpoint-{args.steps}/unet_ema", torch_dtype=torch.float16)
     unet.config.sample_size=32
 

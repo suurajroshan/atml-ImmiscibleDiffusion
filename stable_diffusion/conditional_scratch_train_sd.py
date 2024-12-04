@@ -51,6 +51,10 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
+import sys
+sys.path.append('./../ddpm-torch')
+from ddpm_torch.metrics import calc_fd, InceptionStatistics, get_precomputed
+
 from scipy.optimize import linear_sum_assignment
 
 if is_wandb_available():
@@ -828,6 +832,19 @@ def main():
         num_workers=args.dataloader_num_workers,
     )
 
+    #### Calculate true mean and std for FID
+
+    istats = InceptionStatics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
+
+    if args.dataset_name == "cifar10":
+        true_mean, true_var = get_precomputed('cifar10', download_dir='')
+    elif args.dataset_name == "imagenet-1k": # TODO change name
+        true_mean, true_var = get_precomputed('imagenet_valid', download_dir='')
+
+    logger.info(f'True mean and std downloaded.')
+
+    #### end
+
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -1051,6 +1068,14 @@ def main():
 
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
+
+                        istats.reset()
+
+                        # TODO
+                        
+                        FID = 0
+                        logger.info(f'{FID = }')
+
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
@@ -1071,9 +1096,10 @@ def main():
                                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
                                     shutil.rmtree(removing_checkpoint)
 
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                        accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
+
+                        # save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                        # accelerator.save_state(save_path)
+                        # logger.info(f"Saved state to {save_path}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -1134,7 +1160,7 @@ def main():
             else:
                 generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-            for i in range(len(args.validation_prompts)):
+            for i in range(lekkkkkkkkn(args.validation_prompts)):
                 with torch.autocast("cuda"):
                     image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
                 images.append(image)
