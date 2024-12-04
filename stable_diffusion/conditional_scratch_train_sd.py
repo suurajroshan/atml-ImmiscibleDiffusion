@@ -834,14 +834,14 @@ def main():
 
     #### Calculate true mean and std for FID
 
-    istats = InceptionStatics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
+    # istats = InceptionStatics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
 
-    if args.dataset_name == "cifar10":
-        true_mean, true_var = get_precomputed('cifar10', download_dir='')
-    elif args.dataset_name == "imagenet-1k": # TODO change name
-        true_mean, true_var = get_precomputed('imagenet_valid', download_dir='')
+    # if args.dataset_name == "cifar10":
+    #     true_mean, true_var = get_precomputed('cifar10', download_dir='')
+    # elif args.dataset_name == "imagenet-1k": # TODO change name
+    #     true_mean, true_var = get_precomputed('imagenet_valid', download_dir='')
 
-    logger.info(f'True mean and std downloaded.')
+    # logger.info(f'True mean and std downloaded.')
 
     #### end
 
@@ -1069,12 +1069,12 @@ def main():
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
 
-                        istats.reset()
+                        # istats.reset()
 
-                        # TODO
+                        # # TODO
                         
-                        FID = 0
-                        logger.info(f'{FID = }')
+                        # FID = 0
+                        # logger.info(f'{FID = }')
 
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
@@ -1160,19 +1160,27 @@ def main():
             else:
                 generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-            for i in range(lekkkkkkkkn(args.validation_prompts)):
+            for i in range(len(args.validation_prompts)):
                 with torch.autocast("cuda"):
                     image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
                 images.append(image)
 
         if args.push_to_hub:
-            save_model_card(args, repo_id, images, repo_folder=args.output_dir)
+            save_model_card(args, None, images, repo_folder=args.output_dir)
             upload_folder(
                 repo_id=repo_id,
                 folder_path=args.output_dir,
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
+
+        if len(images) > 0:
+            for i, img in enumerate(images):
+                img.save(os.path.join(args.output_dir, f"{i}_val_imgs_grid.png"))
+
+            image_grid = make_image_grid(images, 1, len(args.validation_prompts))
+        
+        logger.info('End of training.')
 
     accelerator.end_training()
 
