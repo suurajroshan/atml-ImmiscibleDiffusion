@@ -1,11 +1,10 @@
-# #!/bin/bash -l
-# a
-# #SBATCH --job-name=immdiff
-# #SBATCH --nodes=1
-# #SBATCH --partition=gpu
-# #SBATCH --time=24:00:00
-# #SBATCH --output=slurm.out
-# #SBATCH --error=slurm.err
+#!/bin/bash -l
+#SBATCH --job-name=immdiff
+#SBATCH --nodes=1
+#SBATCH --partition=gpu
+#SBATCH --time=24:00:00
+#SBATCH --output=slurm.out
+#SBATCH --error=slurm.err
 
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=29600
