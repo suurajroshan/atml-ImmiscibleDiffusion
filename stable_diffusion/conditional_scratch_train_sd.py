@@ -53,8 +53,9 @@ from diffusers.utils.torch_utils import is_compiled_module
 
 import sys
 sys.path.append('./../ddpm-torch')
-from ddpm_torch.metrics import calc_fd, InceptionStatistics, get_precomputed
-
+from ddpm_torch.metrics import calc_fd, InceptionStatics, get_precomputed
+from ddpm_torch.eval import ImageFolder
+from torchvision.transforms import v2
 from scipy.optimize import linear_sum_assignment
 
 if is_wandb_available():
@@ -837,9 +838,9 @@ def main():
     istats = InceptionStatics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
 
     if args.dataset_name == "cifar10":
-        true_mean, true_var = get_precomputed('cifar10', download_dir='')
+        true_mean, true_var = get_precomputed('cifar10', download_dir='./precomputed')
     elif args.dataset_name == "imagenet-1k": # TODO change name
-        true_mean, true_var = get_precomputed('imagenet_valid', download_dir='')
+        true_mean, true_var = get_precomputed('imagenet_valid', download_dir='./precomputed')
 
     logger.info(f'True mean and std downloaded.')
 
@@ -1069,12 +1070,29 @@ def main():
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
 
+                        # TODO
                         istats.reset()
 
-                        # TODO
-                        
-                        FID = 0
-                        logger.info(f'{FID = }')
+                        logger.info("Running inference for collecting generated images...")
+                        # pipeline = pipeline.to(accelerator.device)
+                        # pipeline.torch_dtype = weight_dtype
+                        # pipeline.set_progress_bar_config(disable=True)
+
+                        # if args.enable_xformers_memory_efficient_attention:
+                        #     pipeline.enable_xformers_memory_efficient_attention()
+
+                        # if args.seed is None:
+                        #     generator = None
+                        # else:
+                        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                        for i in range(len(args.validation_prompts)):
+                            with torch.autocast("cuda"):
+                                image = accelerator(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
+                                x = v2.functional.pil_to_tensor(image).unsqueeze(0)
+                                istats(x.to(accelerator.device))
+                                gen_mean, gen_var = istats.get_statistics()
+                                fid = calc_fd(gen_mean, gen_var, true_mean, true_var)
+                        logger.info(f'fid: {fid}')
 
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
@@ -1160,7 +1178,7 @@ def main():
             else:
                 generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-            for i in range(lekkkkkkkkn(args.validation_prompts)):
+            for i in range(len(args.validation_prompts)):
                 with torch.autocast("cuda"):
                     image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
                 images.append(image)
