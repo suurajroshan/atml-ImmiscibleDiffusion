@@ -53,8 +53,7 @@ from diffusers.utils.torch_utils import is_compiled_module
 
 import sys
 sys.path.append('./../ddpm-torch')
-from ddpm_torch.metrics import calc_fd, InceptionStatics, get_precomputed
-from ddpm_torch.eval import ImageFolder
+from ddpm_torch.metrics import calc_fd, InceptionStatistics, get_precomputed
 from torchvision.transforms import v2
 from scipy.optimize import linear_sum_assignment
 
@@ -763,12 +762,13 @@ def main():
     # 初始化一个空列表
     label_list = []
 
-    with open('imagenet-classes.txt', 'r', encoding='utf-8') as file:
+    filename = 'cifar10-classes.txt' if args.dataset_name == 'cifar10' else 'imagenet-classes.txt' 
+    with open(filename, 'r', encoding='utf-8') as file:
         for line in file:
             label = line.strip()
             label_list.append(label)
 
-    assert len(label_list) == 1000, f"Expected 1000 label classes, but got {len(label_list)}."
+    # assert len(label_list) == 1000, f"Expected 1000 label classes, but got {len(label_list)}."
 
     def tokenize_captions(examples, is_train=True):
         captions = []
@@ -833,9 +833,11 @@ def main():
         num_workers=args.dataloader_num_workers,
     )
 
+    logger.info(next(iter(train_dataloader)))
+
     #### Calculate true mean and std for FID
 
-    istats = InceptionStatics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
+    istats = InceptionStatistics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
 
     if args.dataset_name == "cifar10":
         true_mean, true_var = get_precomputed('cifar10', download_dir='./precomputed')
@@ -1031,7 +1033,7 @@ def main():
                     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
                 else:
                     # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
-                    # Since we predict the noise instead of x_0, the original formulation is slightly changed.
+                    # Since we predict th/e noise instead of x_0, the original formulation is slightly changed.
                     # This is discussed in Section 4.2 of the same paper.
                     snr = compute_snr(noise_scheduler, timesteps)
                     mse_loss_weights = torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(
@@ -1084,15 +1086,38 @@ def main():
                         # if args.seed is None:
                         #     generator = None
                         # else:
-                        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-                        for i in range(len(args.validation_prompts)):
+                        pipeline = StableDiffusionPipeline.from_pretrained(
+                            args.pretrained_model_name_or_path,
+                            vae=accelerator.unwrap_model(vae),
+                            text_encoder=accelerator.unwrap_model(text_encoder),
+                            tokenizer=tokenizer,
+                            unet=accelerator.unwrap_model(unet),
+                            safety_checker=None,
+                            revision=args.revision,
+                            variant=args.variant,
+                            torch_dtype=weight_dtype,
+                        )
+                        pipeline = pipeline.to(accelerator.device)
+                        pipeline.set_progress_bar_config(disable=True)
+
+                        if args.enable_xformers_memory_efficient_attention:
+                            pipeline.enable_xformers_memory_efficient_attention()
+
+                        if args.seed is None:
+                            generator = None
+                        else:
+                            generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+
+                        for prompt in random.choices(label_list, k=128):
                             with torch.autocast("cuda"):
-                                image = accelerator(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
-                                x = v2.functional.pil_to_tensor(image).unsqueeze(0)
-                                istats(x.to(accelerator.device))
-                                gen_mean, gen_var = istats.get_statistics()
-                                fid = calc_fd(gen_mean, gen_var, true_mean, true_var)
+                                image = pipeline(prompt, num_inference_steps=20, generator=generator).images[0]
+                            x = v2.functional.pil_to_tensor(image).unsqueeze(0)
+                            istats(x.to(accelerator.device))
+                        gen_mean, gen_var = istats.get_statistics()
+                        fid = calc_fd(gen_mean, gen_var, true_mean, true_var)
                         logger.info(f'fid: {fid}')
+
+                        del pipeline
 
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:

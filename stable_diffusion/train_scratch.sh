@@ -1,10 +1,13 @@
 #!/bin/bash -l
+
 #SBATCH --job-name=immdiff
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
 #SBATCH --time=24:00:00
 #SBATCH --output=slurm.out
 #SBATCH --error=slurm.err
+
+conda activate sd
 
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=29600
@@ -33,4 +36,4 @@ accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" cond
   --dataloader_num_workers=1 \
   --seed=42 \
   --checkpointing_steps=100 \
-  --image_column=img
+  --image_column=img \
