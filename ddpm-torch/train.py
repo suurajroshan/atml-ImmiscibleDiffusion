@@ -191,7 +191,8 @@ def train(rank=0, args=None, temp_dir=""):
         ema_decay=args.ema_decay,
         rank=rank,
         distributed=distributed,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        immiscibility=args.immiscibility
     )
 
     if args.use_ddim:
@@ -229,7 +230,7 @@ def train(rank=0, args=None, temp_dir=""):
         logger(f"cuDNN benchmark: ON")
 
     logger("Training starts...", flush=True)
-    trainer.train(evaluator, chkpt_path=chkpt_path, image_dir=image_dir)
+    trainer.train(args.immiscibility, evaluator, chkpt_path=chkpt_path, image_dir=image_dir)
 
 
 @errors.record
@@ -280,6 +281,7 @@ def main():
     parser.add_argument("--rigid-launch", action="store_true", help="whether to use torch multiprocessing spawn")
     parser.add_argument("--num-gpus", default=1, type=int, help="number of gpus for distributed training")
     parser.add_argument("--dry-run", action="store_true", help="test-run till the first model update completes")
+    parser.add_argument("--immiscibility", action="store_true", help="test-run till the first model update completes")
 
     args = parser.parse_args()
 

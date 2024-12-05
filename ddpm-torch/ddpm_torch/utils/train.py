@@ -12,6 +12,8 @@ from tqdm import tqdm
 from functools import partial
 from contextlib import nullcontext
 
+from scipy.optimize import linear_sum_assignment
+
 
 class DummyScheduler:
     @staticmethod
@@ -82,7 +84,8 @@ class Trainer:
             ema_decay=0.9999,
             distributed=False,
             rank=0,  # process id for distributed training
-            dry_run=False
+            dry_run=False,
+            immiscibility=False
     ):
         self.model = model
         self.optimizer = optimizer
@@ -131,25 +134,33 @@ class Trainer:
     def timesteps(self):
         return self.diffusion.timesteps
 
-    def get_input(self, x):
+    def get_input(self, x, immiscibility):
+
         x = x.to(self.device)
+        noise = torch.empty_like(x).normal_(generator=self.generator)
+        if immiscibility:
+            distance = torch.linalg.vector_norm(0.10 * x.flatten(start_dim=1).unsqueeze(1) - 0.10 * noise.flatten(start_dim=1).unsqueeze(0), dim=2)
+            dist = distance.cpu().numpy()
+            _, col_ind = linear_sum_assignment(dist)
+            noise = noise[col_ind]
+
         return {
             "x_0": x,
             "t": torch.empty((x.shape[0],), dtype=torch.int64, device=self.device).random_(
                 to=self.timesteps, generator=self.generator),
-            "noise": torch.empty_like(x).normal_(generator=self.generator)
+            "noise": noise
         }
 
-    def loss(self, x):
-        loss = self.diffusion.train_losses(self.model, **self.get_input(x))
+    def loss(self, x, immiscibility):
+        loss = self.diffusion.train_losses(self.model, **self.get_input(x, immiscibility))
         assert loss.shape == (x.shape[0],)
         return loss
 
-    def step(self, x, global_steps=1):
+    def step(self, x, immiscibility, global_steps=1):
         # Note: For DDP models, the gradients collected from different devices are averaged rather than summed.
         # See https://pytorch.org/docs/1.12/generated/torch.nn.parallel.DistributedDataParallel.html
         # Mean-reduced loss should be used to avoid inconsistent learning rate issue when number of devices changes.
-        loss = self.loss(x).mean()
+        loss = self.loss(x, immiscibility).mean()
         loss.div(self.num_accum).backward()  # average over accumulated mini-batches
         if global_steps % self.num_accum == 0:
             # gradient clipping by global norm
@@ -188,7 +199,7 @@ class Trainer:
         assert sample.grad is None
         return sample
 
-    def train(self, evaluator=None, chkpt_path=None, image_dir=None):
+    def train(self, immiscibility, evaluator=None, chkpt_path=None, image_dir=None):
         nrow = math.floor(math.sqrt(self.num_samples))
         if self.num_samples:
             assert self.num_samples % self.world_size == 0, "Number of samples should be divisible by WORLD_SIZE!"
@@ -208,7 +219,7 @@ class Trainer:
                     if isinstance(x, (list, tuple)):
                         x = x[0]  # unconditional model -> discard labels
                     global_steps += 1
-                    self.step(x.to(self.device), global_steps=global_steps)
+                    self.step(x.to(self.device), immiscibility, global_steps=global_steps)
                     t.set_postfix(self.current_stats)
                     results.update(self.current_stats)
                     if self.dry_run and not global_steps % self.num_accum:

@@ -488,6 +488,38 @@ def parse_args():
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
+    parser.add_argument(
+        "--calc-fid-epochs",
+        type=int,
+        default=128,
+        help=(
+            "Epochs to calculate fid scores"
+        ),
+    )
+    parser.add_argument(
+        "--fid-prompt-length",
+        type=int,
+        default=16,
+        help=(
+            "Length of prompt list to calculate fid scores"
+        ),
+    )
+    parser.add_argument(
+        "--num-imgs-save",
+        type=int,
+        default=16,
+        help=(
+            "Number of images to save at the end of the training"
+        ),
+    )
+    parser.add_argument(
+        "--immdiff",
+        default=False,
+        action="store_true",
+        help=(
+            "to run immdiff"
+        ),
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -965,32 +997,33 @@ def main():
                 with torch.no_grad():
                     noise = torch.randn_like(latents) # [B, C. H, W]
                     gathered_noise = [torch.zeros_like(noise) for _ in range(accelerator.num_processes)] # W * [B, C, H, W]
-                    dist.all_gather(gathered_noise, noise)
-                    gathered_noise = torch.cat(gathered_noise, dim=0) # [WB, C, H, W]
-                    distance = torch.linalg.vector_norm(0.10 * latents.to(torch.float16).flatten(start_dim=1).unsqueeze(1) - 0.10 * gathered_noise.to(torch.float16).flatten(start_dim=1).unsqueeze(0), dim=2) # [B, WB]
-                    gathered_distance = [torch.zeros_like(torch.tensor(distance)) for _ in range(accelerator.num_processes)]
-                    dist.all_gather(gathered_distance, torch.tensor(distance))
-                    
+                    if args.immdiff:
+                        dist.all_gather(gathered_noise, noise)
+                        gathered_noise = torch.cat(gathered_noise, dim=0) # [WB, C, H, W]
+                        distance = torch.linalg.vector_norm(0.10 * latents.to(torch.float16).flatten(start_dim=1).unsqueeze(1) - 0.10 * gathered_noise.to(torch.float16).flatten(start_dim=1).unsqueeze(0), dim=2) # [B, WB]
+                        gathered_distance = [torch.zeros_like(torch.tensor(distance)) for _ in range(accelerator.num_processes)]
+                        dist.all_gather(gathered_distance, torch.tensor(distance))
+                        
 
-                    if accelerator.is_main_process:
-                        # Noise Assignment
-                        gathered_distance = torch.cat(gathered_distance, dim=0).cpu().numpy() # [WB, WB]
-                        _, col_ind = linear_sum_assignment(gathered_distance)
-                        # print("Batch Size =", args.train_batch_size * accelerator.num_processes)
-                        # print("Dist BEFORE assignment =", distance.trace())
-                        # print("Dist AFTER assignment =", np.sum(distance[row_ind, col_ind]))
-                        # print("Dist Change Rate =", (distance.trace() - np.sum(distance[row_ind, col_ind])) / distance.trace())
-                        gathered_noise = gathered_noise[col_ind]
+                        if accelerator.is_main_process:
+                            # Noise Assignment
+                            gathered_distance = torch.cat(gathered_distance, dim=0).cpu().numpy() # [WB, WB]
+                            _, col_ind = linear_sum_assignment(gathered_distance)
+                            # print("Batch Size =", args.train_batch_size * accelerator.num_processes)
+                            # print("Dist BEFORE assignment =", distance.trace())
+                            # print("Dist AFTER assignment =", np.sum(distance[row_ind, col_ind]))
+                            # print("Dist Change Rate =", (distance.trace() - np.sum(distance[row_ind, col_ind])) / distance.trace())
+                            gathered_noise = gathered_noise[col_ind]
 
-                        for process in range(accelerator.num_processes):
-                            start_idx = args.train_batch_size * process
-                            end_idx = start_idx + args.train_batch_size
-                            if process == accelerator.process_index:
-                                noise = gathered_noise[start_idx:end_idx].to(accelerator.device)
-                            else:
-                                dist.send(tensor=gathered_noise[start_idx:end_idx].to(accelerator.device), dst=process)
-                    else:
-                        dist.recv(tensor=noise, src=0)
+                            for process in range(accelerator.num_processes):
+                                start_idx = args.train_batch_size * process
+                                end_idx = start_idx + args.train_batch_size
+                                if process == accelerator.process_index:
+                                    noise = gathered_noise[start_idx:end_idx].to(accelerator.device)
+                                else:
+                                    dist.send(tensor=gathered_noise[start_idx:end_idx].to(accelerator.device), dst=process)
+                        else:
+                            dist.recv(tensor=noise, src=0)
                         # Note: main process is normally 0, so here we hardcode.
                     accelerator.wait_for_everyone()
 
@@ -1068,21 +1101,8 @@ def main():
 
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
-
-                        # TODO
                         istats.reset()
-
                         logger.info("Running inference for collecting generated images...")
-                        # pipeline = pipeline.to(accelerator.device)
-                        # pipeline.torch_dtype = weight_dtype
-                        # pipeline.set_progress_bar_config(disable=True)
-
-                        # if args.enable_xformers_memory_efficient_attention:
-                        #     pipeline.enable_xformers_memory_efficient_attention()
-
-                        # if args.seed is None:
-                        #     generator = None
-                        # else:
                         pipeline = StableDiffusionPipeline.from_pretrained(
                             args.pretrained_model_name_or_path,
                             vae=vae,
@@ -1104,16 +1124,20 @@ def main():
                             generator = None
                         else:
                             generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-
-                        for i in range(64):
+                        
+                        fid_pbar = tqdm(range(args.calc_fid_epochs))
+                        for i in fid_pbar:
+                            fid_pbar.set_description("FID epochs: %i" % i)
                             with torch.autocast("cuda"):
-                                out = pipeline(random.choices(label_list, k=64), num_inference_steps=20, generator=generator, safety_checker=None).images
+                                out = pipeline(random.choices(label_list, k=args.fid_prompt_length), num_inference_steps=20, generator=generator, safety_checker=None).images
                                 # for j, img in enumerate(out):
                                     # img.save(f'{global_step}_{i}_{j}.png')
                                 x = torch.stack(v2.PILToTensor()(out))
                                 istats(x.to(accelerator.device))
+                                del x
+                                del out
                         gen_mean, gen_var = istats.get_statistics()
-                        logger.info(f'{gen_mean} {gen_var} {true_mean} {true_var}')
+                        # logger.info(f'{gen_mean} {gen_var} {true_mean} {true_var}')
                         fid = calc_fd(gen_mean, gen_var, true_mean, true_var)
                         logger.info(f'fid: {fid}')
 
@@ -1184,12 +1208,13 @@ def main():
             unet=unet,
             revision=args.revision,
             variant=args.variant,
+            safety_checker=None
         )
         pipeline.save_pretrained(args.output_dir)
 
         # Run a final round of inference.
         images = []
-        if args.validation_prompts is None:
+        if label_list is not None:
             logger.info("Running inference for collecting generated images...")
             pipeline = pipeline.to(accelerator.device)
             pipeline.torch_dtype = weight_dtype
@@ -1202,11 +1227,19 @@ def main():
                 generator = None
             else:
                 generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-
-            for prompt in random.choices(label_list, k=128):
-                with torch.autocast("cuda"):
-                    image = pipeline(prompt, num_inference_steps=20, generator=generator).images[0]
-                images.append(image)
+            
+            val_steps = tqdm(range((int(args.num_imgs_save / args.fid_prompt_length))))
+            for val in val_steps:
+                val_steps.set_description("Validation epochs: %i" %val)
+                for prompt in random.choices(label_list, k=args.fid_prompt_length):
+                    with torch.autocast("cuda"):
+                        image = pipeline(prompt, num_inference_steps=20, generator=generator).images[0]
+                    images.append(image)
+            
+            # save images 
+            logger.info(f"Saving images to {args.output_dir}")
+            for idx, img in enumerate(images):
+                img.save(os.path.join(args.output_dir, f"val_{idx}.png"))
 
         if args.push_to_hub:
             save_model_card(args, repo_id, images, repo_folder=args.output_dir)
