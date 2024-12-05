@@ -13,10 +13,11 @@ python train.py \
     --use-ddim \
     --eval \
     --exp-name="ddim" \
-    -dataset="cifar10" \
+    --dataset="cifar10" \
     --epochs=50 \
     --batch-size=256 \
     --num-samples=64 \
     --chkpt-intv=120 \
     --immiscibility \
-    --dry-run
+    --dry-run \
+    --root="/home/roshasu/atml/datasets"
