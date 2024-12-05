@@ -740,7 +740,6 @@ def main():
 
     # 6. Get the column names for input/target.
     dataset_columns = DATASET_NAME_MAPPING.get(args.dataset_name, None)
-    print(dataset_columns)
     if args.image_column is None:
         image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
     else:
@@ -833,11 +832,9 @@ def main():
         num_workers=args.dataloader_num_workers,
     )
 
-    logger.info(next(iter(train_dataloader)))
-
     #### Calculate true mean and std for FID
 
-    istats = InceptionStatistics(device=accelerator.device, input_transform=lambda im: (im-127.5) / 127.5)
+    istats = InceptionStatistics(device=accelerator.device, input_transform=lambda im: (im - 127.5) / 127.5)
 
     if args.dataset_name == "cifar10":
         true_mean, true_var = get_precomputed('cifar10', download_dir='./precomputed')
@@ -1088,14 +1085,14 @@ def main():
                         # else:
                         pipeline = StableDiffusionPipeline.from_pretrained(
                             args.pretrained_model_name_or_path,
-                            vae=accelerator.unwrap_model(vae),
-                            text_encoder=accelerator.unwrap_model(text_encoder),
+                            vae=vae,
+                            text_encoder=text_encoder,
                             tokenizer=tokenizer,
-                            unet=accelerator.unwrap_model(unet),
-                            safety_checker=None,
+                            unet=unet,
                             revision=args.revision,
                             variant=args.variant,
                             torch_dtype=weight_dtype,
+                            safety_checker=None
                         )
                         pipeline = pipeline.to(accelerator.device)
                         pipeline.set_progress_bar_config(disable=True)
@@ -1108,12 +1105,15 @@ def main():
                         else:
                             generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-                        for prompt in random.choices(label_list, k=128):
+                        for i in range(64):
                             with torch.autocast("cuda"):
-                                image = pipeline(prompt, num_inference_steps=20, generator=generator).images[0]
-                            x = v2.functional.pil_to_tensor(image).unsqueeze(0)
-                            istats(x.to(accelerator.device))
+                                out = pipeline(random.choices(label_list, k=64), num_inference_steps=20, generator=generator, safety_checker=None).images
+                                # for j, img in enumerate(out):
+                                    # img.save(f'{global_step}_{i}_{j}.png')
+                                x = torch.stack(v2.PILToTensor()(out))
+                                istats(x.to(accelerator.device))
                         gen_mean, gen_var = istats.get_statistics()
+                        logger.info(f'{gen_mean} {gen_var} {true_mean} {true_var}')
                         fid = calc_fd(gen_mean, gen_var, true_mean, true_var)
                         logger.info(f'fid: {fid}')
 
@@ -1189,7 +1189,7 @@ def main():
 
         # Run a final round of inference.
         images = []
-        if args.validation_prompts is not None:
+        if args.validation_prompts is None:
             logger.info("Running inference for collecting generated images...")
             pipeline = pipeline.to(accelerator.device)
             pipeline.torch_dtype = weight_dtype
@@ -1203,9 +1203,9 @@ def main():
             else:
                 generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-            for i in range(len(args.validation_prompts)):
+            for prompt in random.choices(label_list, k=128):
                 with torch.autocast("cuda"):
-                    image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
+                    image = pipeline(prompt, num_inference_steps=20, generator=generator).images[0]
                 images.append(image)
 
         if args.push_to_hub:

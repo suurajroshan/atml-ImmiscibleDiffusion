@@ -4,8 +4,9 @@
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
 #SBATCH --time=24:00:00
-#SBATCH --output=slurm.out
-#SBATCH --error=slurm.err
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
+#SBATCH --exclusive
 
 conda activate sd
 
@@ -22,11 +23,11 @@ accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" cond
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
   --use_ema \
-  --resolution=256 --center_crop --random_flip \
-  --train_batch_size=128 \
+  --resolution=32 --center_crop --random_flip \
+  --train_batch_size=256 \
   --gradient_accumulation_steps=1 \
   --gradient_checkpointing \
-  --max_train_steps=1000 \
+  --max_train_steps=500 \
   --learning_rate=1e-04 \
   --max_grad_norm=1 \
   --lr_scheduler="constant" --lr_warmup_steps=0 \
@@ -35,5 +36,5 @@ accelerate launch --main_process_port $MASTER_PORT --mixed_precision="fp16" cond
   --caption_column="label" \
   --dataloader_num_workers=1 \
   --seed=42 \
-  --checkpointing_steps=100 \
+  --checkpointing_steps=500 \
   --image_column=img \
