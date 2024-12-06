@@ -230,7 +230,7 @@ def train(rank=0, args=None, temp_dir=""):
         logger(f"cuDNN benchmark: ON")
 
     logger("Training starts...", flush=True)
-    trainer.train(args.immiscibility, evaluator, chkpt_path=chkpt_path, image_dir=image_dir)
+    trainer.train(evaluator, chkpt_path=chkpt_path, image_dir=image_dir)
 
 
 @errors.record
