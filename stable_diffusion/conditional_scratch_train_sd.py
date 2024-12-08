@@ -57,6 +57,9 @@ from ddpm_torch.metrics import calc_fd, InceptionStatistics, get_precomputed
 from torchvision.transforms import v2
 from scipy.optimize import linear_sum_assignment
 
+from classes import i2d
+import json
+
 if is_wandb_available():
     import wandb
 
@@ -73,6 +76,7 @@ DATASET_NAME_MAPPING = {
     "pcuenq/lsun-bedrooms": ("image"),
     "wtcherr/LAION10K": ("image", "prompt"),
     "mattymchen/celeba-hq": ("image", "label"),
+    "zh-plus/tiny-imagenet": ("image", "label"),
 }
 
 
@@ -792,12 +796,25 @@ def main():
     # !!!!!! This is for ImageNet only, because its label is numbers, not text !!!!!!
     # 初始化一个空列表
     label_list = []
+    # args.dataset_name == 'cifar10' else 'imagenet-classes.txt'
+    if args.dataset_name=='cifar10':
+        filename = 'cifar10-classes.txt'
+        with open(filename, 'r', encoding='utf-8') as file:
+            for line in file:
+                label = line.strip()
+                label_list.append(label) 
+    else:
+        idx2dict = i2d
+        classnames = []
+        with open('dataset_infos.json', 'r') as file:
+            dinfo = json.load(file)
+            labelinfo = dinfo[ str(list(dinfo.keys())[0]) ]["features"]["label"]["names"]
+            dataset_labels = dataset["train"]["label"]
+            unq_labels = np.sort(np.unique(dataset_labels))
+            for i in unq_labels:
+                classnames.append(idx2dict[labelinfo[i]])
+        label_list = classnames
 
-    filename = 'cifar10-classes.txt' if args.dataset_name == 'cifar10' else 'imagenet-classes.txt' 
-    with open(filename, 'r', encoding='utf-8') as file:
-        for line in file:
-            label = line.strip()
-            label_list.append(label)
 
     # assert len(label_list) == 1000, f"Expected 1000 label classes, but got {len(label_list)}."
 
@@ -870,7 +887,7 @@ def main():
 
     if args.dataset_name == "cifar10":
         true_mean, true_var = get_precomputed('cifar10', download_dir='./precomputed')
-    elif args.dataset_name == "imagenet-1k": # TODO change name
+    elif args.dataset_name == "zh-plus/tiny-imagenet": 
         true_mean, true_var = get_precomputed('imagenet_valid', download_dir='./precomputed')
 
     logger.info(f'True mean and std downloaded.')
